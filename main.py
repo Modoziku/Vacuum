@@ -56,91 +56,36 @@ class UsernameScanner:
         return list(generated)
 
     def check_telegram(self, username):
-        """
-        Возвращает True если юзернейм СВОБОДЕН в Telegram.
-        Проверяем через t.me/username.
-        """
+        """Старая добрая проверка как в первой версии"""
         try:
             url = f"https://t.me/{username}"
             response = self.session.get(url, timeout=5, allow_redirects=False)
 
-            # Если редирект — значит юзернейм никому не принадлежит
-            if response.status_code in [301, 302, 303, 307, 308]:
-                return True
-
-            # Если страница открылась, проверяем что на ней
-            if response.status_code == 200:
-                text = response.text.lower()
-
-                # Признаки того, что юзернейм занят
-                if "tgme_page_title" in text:
-                    return False  # Это чей-то профиль
-
-                # Признаки того, что страница не найдена или юзернейм свободен
-                if "not found" in text or "doesn't exist" in text or "no results" in text:
-                    return True
-
-                # Дополнительная проверка: если нет явных признаков профиля
-                if "send message" not in text and "add contact" not in text:
-                    return True
-
-                return False  # По умолчанию считаем занятым
-
-            # Любой другой код — считаем свободным
-            return True
-
-        except requests.RequestException:
-            return False  # Ошибка сети — пропускаем
+            if response.status_code == 302:
+                return "free"
+            elif response.status_code == 200:
+                if "tgme_page_title" in response.text:
+                    return "taken"
+                return "free"
+            return "free"
+        except:
+            return "unknown"
 
     def check_fragment(self, username):
-        """
-        Возвращает True если юзернейм СВОБОДЕН на Fragment.
-        Проверяем через fragment.com/username.
-        """
+        """Старая добрая проверка как в первой версии"""
         try:
             url = f"https://fragment.com/username/{username}"
             response = self.session.get(url, timeout=5)
 
-            # 404 — точно свободен
             if response.status_code == 404:
-                return True
-
-            # Проверяем содержимое страницы
-            if response.status_code == 200:
-                text = response.text.lower()
-
-                # Явные признаки что юзернейм занят или продаётся
-                if "owned" in text:
-                    return False
-                if "price" in text and "ton" in text:
-                    return False
-                if "current owner" in text:
-                    return False
-                if "sale" in text and "username" in text:
-                    return False
-
-                # Явные признаки что свободен
-                if "available" in text:
-                    return True
-                if "this username is free" in text:
-                    return True
-
-                # Если нет явных признаков занятости — проверяем заголовок
-                if "<title>" in text and "fragment" in text:
-                    import re
-                    title_match = re.search(r'<title>(.*?)</title>', text)
-                    if title_match:
-                        title = title_match.group(1).lower()
-                        if "not found" in title or "error" in title:
-                            return True
-
-                # По умолчанию — занят (если страница открылась без признаков)
-                return False
-
-            return True  # Другие коды — свободен
-
-        except requests.RequestException:
-            return False  # Ошибка сети — пропускаем
+                return "free"
+            elif "available" in response.text.lower():
+                return "free"
+            elif "owned" in response.text.lower() or "price" in response.text.lower():
+                return "taken"
+            return "free"
+        except:
+            return "unknown"
 
     def calculate_rarity(self, username):
         score = 0
@@ -196,9 +141,9 @@ class UsernameScanner:
         else:
             return Fore.WHITE
 
-    def save_result(self, username, rarity, score):
+    def save_result(self, username, rarity, score, sources):
         with open("free_usernames.txt", "a") as f:
-            f.write(f"{username} | {rarity} ({score})\n")
+            f.write(f"{username} | {rarity} ({score}) | {', '.join(sources)}\n")
 
     def scan_forever(self, keywords, min_len=5, max_len=16, digits_allowed=True):
         self.found = []
@@ -217,22 +162,26 @@ class UsernameScanner:
             for username in usernames:
                 self.checked += 1
 
-                # Проверяем ОБА источника
-                tg_free = self.check_telegram(username)
-                time.sleep(0.2)
+                tg = self.check_telegram(username)
+                time.sleep(0.15)
 
-                frag_free = self.check_fragment(username)
-                time.sleep(0.2)
+                frag = self.check_fragment(username)
+                time.sleep(0.15)
 
-                # Только если ОБА подтверждают что свободен
-                if tg_free and frag_free:
+                sources = []
+                if tg == "free":
+                    sources.append("TG")
+                if frag == "free":
+                    sources.append("FRAG")
+
+                if sources:
                     rarity, score = self.calculate_rarity(username)
-                    self.found.append((username, rarity, score))
-                    self.save_result(username, rarity, score)
+                    self.found.append((username, rarity, score, sources))
+                    self.save_result(username, rarity, score, sources)
 
                     color = self.rarity_color(rarity)
                     self.log(
-                        f"🎯 @{username} | {rarity} ({score}) | FREE",
+                        f"🎯 @{username} | {rarity} ({score}) | {', '.join(sources)}",
                         color
                     )
 
@@ -253,9 +202,9 @@ class UsernameScanner:
 
             if self.found:
                 self.log("FREE USERNAMES:", Fore.GREEN)
-                for username, rarity, score in sorted(self.found, key=lambda x: x[2], reverse=True)[:20]:
+                for username, rarity, score, sources in sorted(self.found, key=lambda x: x[2], reverse=True)[:20]:
                     color = self.rarity_color(rarity)
-                    self.log(f"  @{username} | {rarity} ({score})", color)
+                    self.log(f"  @{username} | {rarity} ({score}) | {', '.join(sources)}", color)
 
 def main():
     print(Fore.CYAN + "=" * 50)
